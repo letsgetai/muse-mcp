@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from muse import approvals, cards  # noqa: E402
+from muse import approvals, cards, listener  # noqa: E402
 import proactive  # noqa: E402
 from muse.memory import Memory  # noqa: E402
 from muse.store import Store  # noqa: E402
@@ -178,6 +178,37 @@ class ServerTest(Base):
                                      "arguments": {"title": "t", "body": "b"}}}])
         self.assertTrue(out[0]["result"]["isError"])
         self.assertIn("FEISHU_CHAT_ID", out[0]["result"]["content"][0]["text"])
+
+
+class ListenerTest(Base):
+    def setUp(self):
+        super().setUp()
+        self.store = Store(os.path.join(self.home, "t.db"))
+        self.aid = approvals.propose(self.store, op="mail.send", payload={},
+                                     title="要发吗", summary="发", operator=OWNER)
+
+    def tearDown(self):
+        self.store.close()
+        super().tearDown()
+
+    def _ev(self, operator, op="approve"):
+        return {"action_value": json.dumps({"op": op, "aid": self.aid}),
+                "operator_id": operator, "token": ""}
+
+    def test_approve_event_changes_state(self):
+        res = listener.handle_event(self._ev(OWNER), self.store)
+        self.assertTrue(res["ok"])
+        self.assertEqual(self.store.get_pending(self.aid)["status"], "approved")
+
+    def test_stranger_event_rejected(self):
+        res = listener.handle_event(self._ev("ou_stranger"), self.store)
+        self.assertFalse(res["ok"])
+        self.assertEqual(self.store.get_pending(self.aid)["status"], "pending")
+
+    def test_second_click_noop(self):
+        listener.handle_event(self._ev(OWNER), self.store)
+        res = listener.handle_event(self._ev(OWNER), self.store)
+        self.assertFalse(res["ok"])
 
 
 class ProactiveTest(Base):

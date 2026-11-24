@@ -2,12 +2,14 @@
 
 给你的 **现有 agent** 加一层「另一个我」：**记忆 · 卡片 · 授权**。
 
-它不是一个 agent，不跑模型，不做规划。它是四个东西：
+它不是一个 agent，不跑模型，不做规划。**一个进程 + 一段提示词**：
 
+```bash
+python3 server.py --daemon --http 8765   # 一个进程干完：MCP + 定时主动 + 卡片回调
 ```
-MCP server（记忆 + 卡片）  +  审批监听器（接卡片回调）
- +  主动层（没人说话时自己开口）  +  一段提示词（行为规则）
-```
+
+进程里三件事并行：MCP 工具（记忆/卡片/授权）、调度器（该不该开口）、回调监听（按钮点按）。
+提示词只负责告诉 agent 什么时候用哪个工具。
 
 装上之后，你的 agent 会记事、会把要动手的事先做成卡片问你、会用结构化卡片汇报，
 并且会在早上八点半自己找你。
@@ -33,11 +35,12 @@ python3 -m unittest discover -s tests -v    # 22 个离线单测，不联网
 python3 proactive.py --dry-run               # 看它早上会说什么（不发）
 ```
 
-真让它开口（会往飞书发一张卡）：
+一个进程全起来（推荐）：
 
 ```bash
-python3 proactive.py --once      # 立刻发一次（演示）
-python3 proactive.py --loop      # 常驻，每分钟检查是不是到点了
+python3 server.py --daemon --http 8765
+# 或先看看它到点会说什么，不发：
+python3 proactive.py --dry-run
 ```
 
 不写代码直接试一条：
@@ -117,8 +120,10 @@ Aily 用户直接用 [`prompt/aily.md`](prompt/aily.md)，让它自己配。
 
 ## 主动：它自己开口
 
+在 `--daemon` 模式下每分钟检查一次；也可以单独跑：
+
 ```bash
-python3 proactive.py --loop      # 常驻
+python3 proactive.py --loop      # 只跑调度，不带 MCP
 ```
 
 判据（都可用环境变量改）：到点（默认 08:30，5 分钟窗口）→ 不在静默时段（22–08）
@@ -139,6 +144,7 @@ MUSE_BRIEF_AT=08:30 MUSE_BUDGET=3 MUSE_QUIET_START=22 MUSE_QUIET_END=8 python3 p
 ## 已知限制
 
 - **主动的"内容"是摘要，不是思考**，除非配了 waker。摘要能让你确认链路通，但真正有用的是 `MUSE_WAKER_CMD` 那一档。
+- **stdio 模式下调度器不会常驻**：stdio 的 MCP 由宿主拉起、随宿主会话结束而结束，所以 `--daemon` 强制要求 `--http`。别指望 stdio 的 MCP 能在你没开会话时把你叫醒。
 - **授权是"协作式"的**。它靠 agent 自觉在动手前调 `card_ask_approval`；提示词写得不好，agent 可能绕过。真要硬约束，得在宿主层做工具白名单。
 - **卡片绑定飞书**。换 Slack/微信要重写 `muse/cards.py`，状态机可以复用。
 - **记忆是单人的**。多用户部署要按 open_id 分目录（`MUSE_HOME/<open_id>/`），目前没做。

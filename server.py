@@ -21,12 +21,15 @@ import argparse
 import json
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from muse import approvals, cards, feishu  # noqa: E402
+import proactive  # noqa: E402
+from muse import approvals, cards, feishu, listener  # noqa: E402
 from muse.memory import Memory  # noqa: E402
 from muse.store import Store  # noqa: E402
 
@@ -372,9 +375,51 @@ def serve_http(port: int) -> None:
     HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 
+def _scheduler_loop(stop: threading.Event) -> None:
+    """每分钟判断一次该不该主动开口。"""
+    print("[daemon] 调度器已启动", file=sys.stderr, flush=True)
+    while not stop.is_set():
+        try:
+            res = proactive.tick()
+            if res.get("action") == "sent":
+                print(f"[daemon] 主动消息 {res.get('message_id')}", file=sys.stderr, flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[daemon] 调度失败: {exc}", file=sys.stderr, flush=True)
+        stop.wait(60)
+
+
+def run_daemon(port: int) -> None:
+    """一个进程干三件事：MCP(HTTP) + 调度 + 卡片回调。"""
+    stop = threading.Event()
+    threads = [
+        threading.Thread(target=_scheduler_loop, args=(stop,), daemon=True,
+                         name="scheduler"),
+        threading.Thread(target=lambda: _listener_loop(stop), daemon=True,
+                         name="listener"),
+    ]
+    for t in threads:
+        t.start()
+    try:
+        serve_http(port)
+    finally:
+        stop.set()
+
+
+def _listener_loop(stop: threading.Event) -> None:
+    while not stop.is_set():
+        try:
+            listener.run(store())
+        except Exception as exc:  # noqa: BLE001 事件流断了就重连
+            print(f"[daemon] 监听失败，5 秒后重试: {exc}", file=sys.stderr, flush=True)
+            stop.wait(5)
+
+
 def main() -> None:
-    p = argparse.ArgumentParser(description="Muse MCP server")
+    p = argparse.ArgumentParser(
+        description="Muse MCP server（--daemon 时同时跑调度与卡片回调）")
     p.add_argument("--http", type=int, default=0, help="HTTP 端口，0 表示 stdio")
+    p.add_argument("--daemon", action="store_true",
+                   help="常驻模式：HTTP MCP + 定时主动 + 卡片回调，一个进程")
     p.add_argument("--selftest", action="store_true", help="不跑 server，检查环境")
     args = p.parse_args()
 
@@ -385,6 +430,12 @@ def main() -> None:
             "feishu_configured": _chat_configured(),
             "owner": bool(os.environ.get("MUSE_OWNER_OPEN_ID")),
         }, ensure_ascii=False, indent=2))
+        return
+
+    if args.daemon:
+        if not args.http:
+            p.error("--daemon 需要配 --http PORT：常驻要用 HTTP，别用 stdio")
+        run_daemon(args.http)
         return
 
     if args.http:
