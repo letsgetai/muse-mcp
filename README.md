@@ -116,7 +116,7 @@ $MUSE_HOME/                 # 默认 ~/.muse
 ```
 
 **行为规则**：把 [`skill/SKILL.md`](skill/SKILL.md) 塞进宿主的技能/人设；
-Aily 用户直接用 [`prompt/aily.md`](prompt/aily.md)，让它自己配。
+Aily 用户直接把 [`prompt/aily.md`](prompt/aily.md) 整段发给它，让它自己配。
 
 ## 主动：它自己开口
 
