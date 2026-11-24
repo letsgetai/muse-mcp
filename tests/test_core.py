@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from muse import approvals, cards  # noqa: E402
+import proactive  # noqa: E402
 from muse.memory import Memory  # noqa: E402
 from muse.store import Store  # noqa: E402
 
@@ -177,6 +178,54 @@ class ServerTest(Base):
                                      "arguments": {"title": "t", "body": "b"}}}])
         self.assertTrue(out[0]["result"]["isError"])
         self.assertIn("FEISHU_CHAT_ID", out[0]["result"]["content"][0]["text"])
+
+
+class ProactiveTest(Base):
+    """主动层：只测判断，不发卡片。"""
+
+    def _store(self):
+        return Store(os.path.join(self.home, "t.db"))
+
+    def cfg(self):
+        return {"brief_at": "08:30", "budget": 3, "quiet_start": 22,
+                "quiet_end": 8, "min_gap_min": 90}
+
+    def test_sends_at_brief_time(self):
+        from datetime import datetime
+        res = proactive.plan(datetime(2026, 11, 25, 8, 31), self.cfg(),
+                             last_sent_ts=None, sent_today=0)
+        self.assertEqual(res["action"], "send")
+
+    def test_skips_quiet_hours(self):
+        from datetime import datetime
+        res = proactive.plan(datetime(2026, 11, 25, 23, 0), self.cfg(),
+                             last_sent_ts=None, sent_today=0)
+        self.assertEqual(res["reason"], "静默时段")
+
+    def test_skips_when_budget_used(self):
+        from datetime import datetime
+        res = proactive.plan(datetime(2026, 11, 25, 8, 31), self.cfg(),
+                             last_sent_ts=None, sent_today=3)
+        self.assertEqual(res["action"], "skip")
+
+    def test_skips_when_too_soon(self):
+        from datetime import datetime
+        last = int(datetime(2026, 11, 25, 9, 30).timestamp() * 1000)
+        res = proactive.plan(datetime(2026, 11, 25, 10, 0), self.cfg(),
+                             last_sent_ts=last, sent_today=1, forced=True)
+        self.assertIn("间隔", res["reason"])
+
+    def test_digest_contains_memory_and_pending(self):
+        from datetime import datetime
+        m = Memory(self.home)
+        m.remember("Dana 的报价是 48k", entity="Dana")
+        st = self._store()
+        try:
+            d = proactive.build_digest(m, st, datetime(2026, 11, 25, 8, 30))
+            self.assertTrue(any("48k" in str(x) for x in d["items"]))
+            self.assertEqual(d["metrics"][0][0], "记忆")
+        finally:
+            st.close()
 
 
 if __name__ == "__main__":

@@ -47,7 +47,9 @@ echo
 echo "下一步："
 echo "  1) 跑测试：   python3 -m unittest discover -s tests -v"
 echo "  2) 起监听器： python3 approve_listener.py        # 必须先起，否则按钮点不动"
-echo "  3) 接宿主：   python3 server.py                  # stdio"
+echo "  3) 让它开口： python3 proactive.py --dry-run       # 先看内容"
+echo "                python3 proactive.py --loop         # 到点自己发"
+echo "  4) 接宿主：   python3 server.py                  # stdio"
 echo "                python3 server.py --http 8765      # HTTP"
 echo
 echo "systemd 常驻（可选，不需要 sudo）："
